@@ -6,52 +6,57 @@
 #
 # Required parameters
 #
-$VM_name = ""                 # Name of the VM
-$Service_Name = ""            # a.k.a Deployment Name
-$AzureSubscriptionName=""     # Subscription hosting the VM (you'll need co-admin permissions)
+$VM_name = ""                                   # Name of the VM, e.g "yossia-sql-vm5"     
+$Service_Name = ""                              # a.k.a Deployment Name, e.g  "yossia-sql-vm57953
+$AzureSubscriptionName="BIA_Onesi_Stage0_ATD1"  # Subscription hosting the VM (co-admin permissions are needed)
 
 #
 # Enabling Azure Diagnostics requires a storage account to where logs will be stored (regardless of Application Insights).
-# The script can not fetch the storage account and key that are already configured so you'll need provide a storage name and key. 
-# Can be on any subscription, not neccessarily where the VM is.
+# The storage account and key do not have to match the preconfigured set.
+# Storage account can be on any subscription, not neccessarily where the VM is.
 #
-$Diagnostics_Storage_Name = ""    
-$Diagnostics_Storage_Key = ""
+$Diagnostics_Storage_Name = ""    # e.g "webroleforwad"
+$Diagnostics_Storage_Key =  ""    # "(truncated)+rDzuzAyYDvwDrq4Utg0hqA=="
+
 #
 # Instrumentation Key identifies the Application Insights resource to which your logs will get sent.
 # Provide an existing Instrumentation Key or create a new one with one click at https://ms.portal.azure.com/?flight=1#blade/HubsExtension/Resources/resourceType/microsoft.insights%2Fcomponents
 #
-$ApplicationInsightsInstrumentationKey =""
+$ApplicationInsightsInstrumentationKey ="" # e.g "ad65d3b2-b50e-46ab-a0da-e7873feba7fd"
 
-If (($Service_Name -eq "") -Or ($VM_name -eq "") -Or ($VM_name -eq "") -Or ($AzureSubscriptionName -eq "") -Or ($Diagnostics_Storage_Name -eq "") -Or ($Diagnostics_Storage_Key -eq "") -Or ($ApplicationInsightsInstrumentationKey -eq "") )
+If (($Service_Name -eq "") -Or ($VM_name -eq "") -Or ($AzureSubscriptionName -eq "") -Or ($Diagnostics_Storage_Name -eq "") -Or ($Diagnostics_Storage_Key -eq "") -Or ($ApplicationInsightsInstrumentationKey -eq "") )
 {
     "Required run-time paramter is missing."
     return
 }
 
-#
+
 # This is where we'll keep the Azure Diagnostics Public Configuration in case you ever want to edit/reuse it
-#
 $PublicConfigPath = ".\" + $VM_name + "_DiagPublicConfig.xml"
 
-# Let's roll the execution. Insert credentials manually. Can be changed to authenticate with a management cert.
+# Enter credentials manually. Can be changed to authenticate with a management cert.
 Add-AzureAccount 
 Select-AzureSubscription $AzureSubscriptionName
 $VM = Get-AzureVM -ServiceName $Service_Name -Name $VM_name
 $extensionContext = Get-AzureVMDiagnosticsExtension -VM $VM
-$publicConfiguration = $extensionContext.PublicConfiguration | ConvertFrom-Json
 
-#
-# Extract the current/existing Public Configuration and save it to disk so we can patch it
-#
-[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($publicConfiguration.xmlcfg)) | Out-File -Encoding utf8 -FilePath $PublicConfigPath
+if($extensionContext.PublicConfiguration)
+{
+    # Extract the current/existing Public Configuration and save it to disk so we can patch it
+    $publicConfiguration = $extensionContext.PublicConfiguration | ConvertFrom-Json
+    [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($publicConfiguration.xmlcfg)) | Out-File -Encoding utf8 -FilePath $PublicConfigPath
+}
+else 
+{
+    # Enable WAD2AI with default WAD settings
+    $PublicConfigPath = ".\DiagPublicConfigTemplateVM.xml"
+    "Since Azure Diagnostics is not currently enabled on $VM_name, we'll be using a template at $PublicConfigPath"
+}
 
-# 
-# Go ahead and update the Public Configuration to enable ingestion of WAD into Application Insights.
+# All is set, let's go ahead and update the Public Configuration to enable ingestion of WAD into Application Insights.
 # These setting would make decent defaults for sending data to AI, but you can change the verbosity levels if you like.
 # For more info about how to edit Application Insights ingestion through Azure Diagnostics please read here
 # https://azure.microsoft.com/en-us/documentation/articles/azure-diagnostics-configure-applicationinsights/
-# 
 [xml] $x ='<Sink name="ApplicationInsights">
         <ApplicationInsights>' + $ApplicationInsightsInstrumentationKey + '</ApplicationInsights>
         <Channels>
@@ -60,28 +65,25 @@ $publicConfiguration = $extensionContext.PublicConfiguration | ConvertFrom-Json
         </Channels>
     </Sink>'
 
-[xml] $doc = Get-Content($PublicConfigPath)
-#
-# Check if Application Insights is already enabled for Diagnostics on this VM and exit if so.
-# TODO: Deal with cases where AI config is wrong or incomplete. For now we'll just avoid double enablement.
-#
-$sinks = $doc.WadCfg.DiagnosticMonitorConfiguration.GetAttribute(“sinks”)
-ForEach ($_ in $sinks) {
-    if ($_ -icontains ”ApplicationInsights.MyLogData”)
-    {
-        "Application Insights is already enabled for diagnostics on $VM_Name"
-        return
-    }
-}
+[xml] $doc = Get-Content($PublicConfigPath) 
+
 $doc.WadCfg.DiagnosticMonitorConfiguration.SetAttribute(“sinks”,”ApplicationInsights.MyLogData”)
+
+# Delete all existing sinks and recreate...
+# TBD - we might be losing a non Application Inisghts sink here, but that's quite unlikely
+if ($doc.WadCfg.SinksConfig)
+{
+    $doc.WadCfg.RemoveChild($doc.WadCfg.SinksConfig)
+}
+
 $child = $doc.CreateElement("SinksConfig")
+$child.SetAttribute("xmlns", ”http://schemas.microsoft.com/ServiceHosting/2010/10/DiagnosticsConfiguration")
 $child.InnerXml = $x.InnerXml
 $doc.WadCfg.AppendChild($child)
 $doc.Save($PublicConfigPath)
 
-# 
+
 # Finally, update the Diagnostics Extension configuration
-#
 $VM_update = Set-AzureVMDiagnosticsExtension -DiagnosticsConfigurationPath $PublicConfigPath -Version "1.*" -VM $VM -StorageAccountName $Diagnostics_Storage_Name -StorageAccountKey $Diagnostics_Storage_Key
 Update-AzureVM -ServiceName $Service_Name -Name $VM_Name -VM $VM_Update.VM
 

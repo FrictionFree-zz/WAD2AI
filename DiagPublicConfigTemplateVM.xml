@@ -1,0 +1,42 @@
+<WadCfg>
+  <DiagnosticMonitorConfiguration overallQuotaInMB="4096" xmlns="http://schemas.microsoft.com/ServiceHosting/2010/10/DiagnosticsConfiguration" >
+    <Metrics>
+      <MetricAggregation scheduledTransferPeriod="PT1H" />
+      <MetricAggregation scheduledTransferPeriod="PT1M" />
+    </Metrics>
+    <DiagnosticInfrastructureLogs scheduledTransferPeriod="PT1M" scheduledTransferLogLevelFilter="Warning" />
+    <PerformanceCounters>
+      <PerformanceCounterConfiguration counterSpecifier="\Processor(_Total)\% Processor Time" sampleRate="PT15S" unit="Percent">
+        <annotation displayName="CPU percentage guest OS" locale="en-us" />
+      </PerformanceCounterConfiguration>
+      <PerformanceCounterConfiguration counterSpecifier="\System\Processes" sampleRate="PT15S" unit="Count">
+        <annotation displayName="Processes" locale="en-us" />
+      </PerformanceCounterConfiguration>
+      <PerformanceCounterConfiguration counterSpecifier="\Memory\Available Bytes" sampleRate="PT15S" unit="Bytes">
+        <annotation displayName="Memory available" locale="en-us" />
+      </PerformanceCounterConfiguration>
+      <PerformanceCounterConfiguration counterSpecifier="\Process(_Total)\% Processor Time" sampleRate="PT15S" unit="Percent">
+        <annotation displayName="Process total time" locale="en-us" />
+      </PerformanceCounterConfiguration>
+      <PerformanceCounterConfiguration counterSpecifier="\PhysicalDisk(_Total)\Disk Read Bytes/sec" sampleRate="PT15S" unit="BytesPerSecond">
+        <annotation displayName="Disk read guest OS" locale="en-us" />
+      </PerformanceCounterConfiguration>
+      <PerformanceCounterConfiguration counterSpecifier="\PhysicalDisk(_Total)\Disk Write Bytes/sec" sampleRate="PT15S" unit="BytesPerSecond">
+        <annotation displayName="Disk write guest OS" locale="en-us" />
+      </PerformanceCounterConfiguration>
+    </PerformanceCounters>
+    <WindowsEventLog scheduledTransferPeriod="PT1M">
+      <DataSource name="Security!*[System[(Level = 1) or (Level = 2)]]" />
+      <DataSource name="Application!*[System[(Level = 1) or (Level = 2)]]" />
+      <DataSource name="System!*[System[(Level = 1) or (Level = 2)]]" />
+    </WindowsEventLog>
+    <EtwProviders>
+      <EtwEventSourceProviderConfiguration provider="Service Control Manager">
+        <DefaultEvents />
+      </EtwEventSourceProviderConfiguration>
+      <EtwManifestProviderConfiguration provider="3000B92B-CA8B-4269-90EA-C4185EE09E92" scheduledTransferPeriod="PT1M">
+        <DefaultEvents eventDestination="WindowsAzureGuestAgent" />
+      </EtwManifestProviderConfiguration>
+    </EtwProviders>
+  </DiagnosticMonitorConfiguration>
+</WadCfg>
