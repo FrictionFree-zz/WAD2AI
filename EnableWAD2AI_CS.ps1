@@ -65,7 +65,6 @@ else
     </Sink>'
 
 [xml] $doc = Get-Content($PublicConfigPath) 
-
 $doc.PublicConfig.WadCfg.DiagnosticMonitorConfiguration.SetAttribute(“sinks”,”ApplicationInsights.MyLogData”)
 
 # Delete all existing sinks and recreate...
@@ -74,15 +73,11 @@ if ($doc.PublicConfig.WadCfg.SinksConfig)
     $doc.PublicConfig.WadCfg.RemoveChild($doc.PublicConfig.WadCfg.SinksConfig)
 }
 
-
 $child = $doc.CreateElement("SinksConfig")
 $child.SetAttribute("xmlns", ”http://schemas.microsoft.com/ServiceHosting/2010/10/DiagnosticsConfiguration")
 $child.InnerXml = $x.InnerXml
 $doc.PublicConfig.WadCfg.AppendChild($child)
-
-
 $doc.Save($PublicConfigPath)
-
 
 # Finally, update the Diagnostics Extension's configuration
 Set-AzureServiceDiagnosticsExtension -DiagnosticsConfigurationPath $PublicConfigPath –ServiceName $Service_Name -Slot ‘Production’ -Role $Role_Name -StorageAccountName $Diagnostics_Storage_Name -StorageAccountKey $Diagnostics_Storage_Key
