@@ -42,12 +42,14 @@ $extensionContext = Get-AzureServiceDiagnosticsExtension –ServiceName $Service
 if($extensionContext.PublicConfiguration)
 {
     # Extract the current/existing Public Configuration and save it to disk so we can update it
+    $config_type = "Existing"
     $publicConfiguration = '<?xml version="1.0" encoding="utf-8"?>' + "`r`n"  + $extensionContext.PublicConfiguration
     $publicConfiguration | Out-File -Encoding utf8 -FilePath $PublicConfigPath
 }
 else 
 {
     # Enable WAD2AI with default Azure Diagnostics settings
+    $config_type = "Template"
     $PublicConfigPath = ".\DiagPublicConfigTemplateCS.xml"
     "Since Azure Diagnostics is not currently enabled on $Role_Name, we'll be using a template from $PublicConfigPath"
 }
@@ -79,5 +81,21 @@ $child.InnerXml = $x.InnerXml
 $doc.PublicConfig.WadCfg.AppendChild($child)
 $doc.Save($PublicConfigPath)
 
-# Finally, update the Diagnostics Extension's configuration
+# Update the Diagnostics Extension's configuration
 Set-AzureServiceDiagnosticsExtension -DiagnosticsConfigurationPath $PublicConfigPath –ServiceName $Service_Name -Slot ‘Production’ -Role $Role_Name -StorageAccountName $Diagnostics_Storage_Name -StorageAccountKey $Diagnostics_Storage_Key
+
+# Finally, report this action in your application log
+$uri = "http://dc.services.visualstudio.com/v2/track"
+$ikeys_array = @($ApplicationInsights_InstrumentationKey, "ad65d3b2-b50e-46ab-a0da-e7873feba7fd")
+$json_str = '{"time":"","iKey":"","name":"Microsoft.ApplicationInsights.ad65d3b2b50e46aba0dae7873feba7fd.Event","tags":{"ai.device.type":"PC","ai.internal.sdkVersion":"PowerShell:raw","ai.user.id":"","ai.operation.name":"wad2ai"},"data":{"baseType":"EventData","baseData":{"ver":2,"name":"WAD2AI enabled successfully","properties":{"RoleName":"", "Settings":""}}}}'
+$body = $json_str | ConvertFrom-Json
+$body.time = ((get-date).ToUniversalTime()).ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+$body.tags.'ai.user.id' = $env:COMPUTERNAME
+$body.data[0].baseData.properties.RoleName = $Role_Name
+$body.data[0].baseData.properties.Settings = $config_type
+
+foreach ($ikey in $ikeys_array) {
+	$body.ikey = $ikey
+	$json_str = $body | ConvertTo-Json -Depth 3
+	Invoke-RestMethod -Method Post -Uri $uri -Body $json_str
+}

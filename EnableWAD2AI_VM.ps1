@@ -9,7 +9,7 @@
 #
 $VM_Name = ""                                   # The name of the VM, e.g "yossia-sql-vm5"     
 $Service_Name = ""                              # The deployment name of the VM, e.g  "yossia-sql-vm57953
-$AzureSubscriptionName="BIA_Onesi_Stage0_ATD1"  # The name of the Azure subscription hosting the VM (co-admin permissions are needed)
+$AzureSubscriptionName=""                       # The name of the Azure subscription hosting the VM (co-admin permissions are needed)
 
 #
 # Enabling Azure Diagnostics requires an Azure Storage Account where logs will be stored in (regardless of Application Insights).
@@ -43,12 +43,14 @@ $extensionContext = Get-AzureVMDiagnosticsExtension -VM $VM
 if($extensionContext.PublicConfiguration)
 {
     # Extract the current/existing Public Configuration and save it to disk so we can update it
+	$config_type = "Existing"
     $publicConfiguration = $extensionContext.PublicConfiguration | ConvertFrom-Json
     [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($publicConfiguration.xmlcfg)) | Out-File -Encoding utf8 -FilePath $PublicConfigPath
 }
 else 
 {
     # Enable WAD2AI with default Azure Diagnostics settings
+	$config_type = "Template"
     $PublicConfigPath = ".\DiagPublicConfigTemplateVM.xml"
     "Since Azure Diagnostics is not currently enabled on $VM_Name, we'll be using a template at $PublicConfigPath"
 }
@@ -80,7 +82,25 @@ $child.InnerXml = $x.InnerXml
 $doc.WadCfg.AppendChild($child)
 $doc.Save($PublicConfigPath)
 
-# Finally, update the Diagnostics Extension's configuration
+# Update the Diagnostics Extension's configuration
 $VM_update = Set-AzureVMDiagnosticsExtension -DiagnosticsConfigurationPath $PublicConfigPath -Version "1.*" -VM $VM -StorageAccountName $Diagnostics_Storage_Name -StorageAccountKey $Diagnostics_Storage_Key
 Update-AzureVM -ServiceName $Service_Name -Name $VM_Name -VM $VM_Update.VM
+
+# Finally, report this action in your application log
+$uri = "http://dc.services.visualstudio.com/v2/track"
+$ikeys_array = @($ApplicationInsights_InstrumentationKey, "ad65d3b2-b50e-46ab-a0da-e7873feba7fd")
+$json_str = '{"time":"","iKey":"","name":"Microsoft.ApplicationInsights.ad65d3b2b50e46aba0dae7873feba7fd.Event","tags":{"ai.device.type":"PC","ai.internal.sdkVersion":"PowerShell:raw","ai.user.id":"","ai.operation.name":"wad2ai"},"data":{"baseType":"EventData","baseData":{"ver":2,"name":"WAD2AI enabled successfully","properties":{"VMName":"", "Settings":""}}}}'
+$body = $json_str | ConvertFrom-Json
+$body.time = ((get-date).ToUniversalTime()).ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+$body.tags.'ai.user.id' = $env:COMPUTERNAME
+$body.data[0].baseData.properties.VMName = $VM_Name
+$body.data[0].baseData.properties.Settings = $config_type
+
+foreach ($ikey in $ikeys_array) {
+	$body.ikey = $ikey
+	$json_str = $body | ConvertTo-Json -Depth 3
+	Invoke-RestMethod -Method Post -Uri $uri -Body $json_str
+}
+
+
 
