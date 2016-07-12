@@ -8,8 +8,14 @@
 # Required parameters
 #
 $VM_Name = ""                                   # The name of the VM, e.g "yossia-sql-vm5"     
-$Service_Name = ""                              # The deployment name of the VM, e.g  "yossia-sql-vm57953
 $AzureSubscriptionName=""                       # The name of the Azure subscription hosting the VM (co-admin permissions are needed)
+
+#
+# Mutually exclusive parameters
+# This script supports configuring VMs that were provisioned by Azure Resource Manager as well as in the "Classic" way.
+#
+$Service_Name = ""                              # For Classic mode, specify the deployment name of the VM, e.g  "yossia-sql-vm57953"
+$ResourceGroup_Name= ""                         # For ARM mode, specify the resource group name, e.g  "yossia-west-us"
 
 #
 # Enabling Azure Diagnostics requires an Azure Storage Account where logs will be stored in (regardless of Application Insights).
@@ -22,29 +28,48 @@ $Diagnostics_Storage_Key =  ""    # e.g. "(truncated)+rDzuzAyYDvwDrq4Utg0hqA=="
 # An Instrumentation Key identifies the Application Insights resource to which your Azure Diagnostics telemetry will be sent.
 # Provide an existing Instrumentation Key or create a new one with one click at https://ms.portal.azure.com/?flight=1#blade/HubsExtension/Resources/resourceType/microsoft.insights%2Fcomponents
 
-$ApplicationInsights_InstrumentationKey =""
+$ApplicationInsights_InstrumentationKey =""  # e.g. "ad65d3b2-b50e-46ab-a0da-e7873feba7fd"
 
-If (($Service_Name -eq "") -Or ($VM_Name -eq "") -Or ($AzureSubscriptionName -eq "") -Or ($Diagnostics_Storage_Name -eq "") -Or ($Diagnostics_Storage_Key -eq "") -Or ($ApplicationInsightsInstrumentationKey -eq "") )
+If (($VM_Name -eq "") -Or ($AzureSubscriptionName -eq "") -Or ($Diagnostics_Storage_Name -eq "") -Or ($Diagnostics_Storage_Key -eq "") -Or ($ApplicationInsights_InstrumentationKey -eq "") )
 {
     "A required paramter is missing."
     return
 }
 
+If (($Service_Name -eq "") -And ($ResourceGroup_Name) -eq "")
+{
+    "Missing paramter: please specify either the Service Name or Resource Group Name"
+    return
+}
 
 # This is where we'll keep the Azure Diagnostics Public Configuration in case you ever want to edit/reuse it
 $PublicConfigPath = ".\" + $VM_Name + "_DiagPublicConfig.xml"
 
 # Begin running the script. You'll be prompted to insert your Azure account's credentials manually. This can be changed to authenticate with a management certificate.
-Add-AzureAccount 
-Select-AzureSubscription $AzureSubscriptionName
-$VM = Get-AzureVM -ServiceName $Service_Name -Name $VM_Name
-$extensionContext = Get-AzureVMDiagnosticsExtension -VM $VM
+If (!($Service_Name -eq ""))
+{
+    # Classic mode
+    Add-AzureAccount 
+    Select-AzureSubscription $AzureSubscriptionName
+    $VM = Get-AzureVM -ServiceName $Service_Name -Name $VM_Name
+    $extensionContext = Get-AzureRVMDiagnosticsExtension -VM $VM
+    $PublicConfigEncoded = $extensionContext.PublicConfiguration
+}
+Else 
+{
+    # ARM mode
+    Add-AzureRmAccount 
+    Select-AzureRmSubscription -SubscriptionName $AzureSubscriptionName
+    $extensionContext = Get-AzureRmVMDiagnosticsExtension -VMName $VM_Name -ResourceGroupName $ResourceGroup_Name
+    $PublicConfigEncoded = $extensionContext.PublicSettings
+}
 
-if($extensionContext.PublicConfiguration)
+
+if($PublicConfigEncoded)
 {
     # Extract the current/existing Public Configuration and save it to disk so we can update it
 	$config_type = "Existing"
-    $publicConfiguration = $extensionContext.PublicConfiguration | ConvertFrom-Json
+    $publicConfiguration = $PublicConfigEncoded | ConvertFrom-Json
     [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($publicConfiguration.xmlcfg)) | Out-File -Encoding utf8 -FilePath $PublicConfigPath
 }
 else 
@@ -60,7 +85,7 @@ else
 # For more info about how to edit Application Insights ingestion through Azure Diagnostics, please read here:
 # https://azure.microsoft.com/en-us/documentation/articles/azure-diagnostics-configure-applicationinsights/
 [xml] $x ='<Sink name="ApplicationInsights">
-        <ApplicationInsights>' + $ApplicationInsightsInstrumentationKey + '</ApplicationInsights>
+        <ApplicationInsights>' + $ApplicationInsights_InstrumentationKey + '</ApplicationInsights>
         <Channels>
         <Channel logLevel="Error" name="MyTopDiagData"  />
         <Channel logLevel="Verbose" name="MyLogData"  />
@@ -83,8 +108,17 @@ $doc.WadCfg.AppendChild($child)
 $doc.Save($PublicConfigPath)
 
 # Update the Diagnostics Extension's configuration
-$VM_update = Set-AzureVMDiagnosticsExtension -DiagnosticsConfigurationPath $PublicConfigPath -Version "1.*" -VM $VM -StorageAccountName $Diagnostics_Storage_Name -StorageAccountKey $Diagnostics_Storage_Key
-Update-AzureVM -ServiceName $Service_Name -Name $VM_Name -VM $VM_Update.VM
+If (!($Service_Name -eq ""))
+{
+    # Classic mode
+    $VM_update = Set-AzureVMDiagnosticsExtension -DiagnosticsConfigurationPath $PublicConfigPath -Version "1.*" -VM $VM -StorageAccountName $Diagnostics_Storage_Name -StorageAccountKey $Diagnostics_Storage_Key
+    Update-AzureVM -ServiceName $Service_Name -Name $VM_Name -VM $VM_Update.VM
+}
+Else
+{
+    # ARM mode
+    Set-AzureRmVMDiagnosticsExtension -ResourceGroupName $ResourceGroup_Name -DiagnosticsConfigurationPath $PublicConfigPath -VMName $VM_Name -StorageAccountName $Diagnostics_Storage_Name -StorageAccountKey $Diagnostics_Storage_Key
+}
 
 # Finally, report this action in your application log
 $uri = "http://dc.services.visualstudio.com/v2/track"
