@@ -86,8 +86,8 @@ Set-AzureServiceDiagnosticsExtension -DiagnosticsConfigurationPath $PublicConfig
 
 # Finally, report this action in your application log
 $uri = "http://dc.services.visualstudio.com/v2/track"
-$ikeys_array = @($ApplicationInsights_InstrumentationKey, "ad65d3b2-b50e-46ab-a0da-e7873feba7fd")
-$json_str = '{"time":"","iKey":"","name":"Microsoft.ApplicationInsights.ad65d3b2b50e46aba0dae7873feba7fd.Event","tags":{"ai.device.type":"PC","ai.internal.sdkVersion":"PowerShell:raw","ai.user.id":"","ai.operation.name":"wad2ai"},"data":{"baseType":"EventData","baseData":{"ver":2,"name":"WAD2AI enabled successfully","properties":{"RoleName":"", "Settings":""}}}}'
+$ikeys_array = @($ApplicationInsights_InstrumentationKey)
+$json_str = '{"time":"","iKey":"","name":"Microsoft.ApplicationInsights.Event","tags":{"ai.device.type":"PC","ai.internal.sdkVersion":"PowerShell:raw","ai.user.id":"","ai.operation.name":"wad2ai"},"data":{"baseType":"EventData","baseData":{"ver":2,"name":"WAD2AI enabled successfully","properties":{"RoleName":"", "Settings":""}}}}'
 $body = $json_str | ConvertFrom-Json
 $body.time = ((get-date).ToUniversalTime()).ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
 $body.tags.'ai.user.id' = $env:COMPUTERNAME
